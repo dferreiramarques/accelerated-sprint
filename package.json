@@ -1,0 +1,19 @@
+{
+  "name": "ai-sprint-room",
+  "version": "1.0.0",
+  "description": "Live control room for an AI-accelerated Design Sprint: facilitator console, team lobby, pushed timeboxes and messages.",
+  "main": "server.js",
+  "private": true,
+  "scripts": {
+    "start": "node server.js",
+    "dev": "FACILITATOR_PIN=1234 DATA_DIR=./data node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "UNLICENSED",
+  "dependencies": {
+    "express": "^4.22.3",
+    "socket.io": "^4.8.4"
+  }
+}
