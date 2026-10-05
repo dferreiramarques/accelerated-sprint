@@ -15,8 +15,11 @@ const PIN = process.env.FACILITATOR_PIN || "";
 const SECRET = process.env.SESSION_SECRET || PIN || "dev";
 const DATA_DIR = process.env.DATA_DIR || process.env.RAILWAY_VOLUME_MOUNT_PATH || path.join(__dirname, "data");
 const DB_FILE = path.join(DATA_DIR, "sprints.json");
+const RETENTION_DAYS = Math.max(0, Number(process.env.RETENTION_DAYS == null ? 30 : process.env.RETENTION_DAYS) || 0); // 0 = keep forever
+const SESSION_HOURS = 12;
 
 if (!PIN) console.warn("[warn] FACILITATOR_PIN is not set: facilitator login is disabled until you set it.");
+else if (!process.env.SESSION_SECRET) console.warn("[warn] SESSION_SECRET is not set: facilitator sessions are signed with the PIN. Set a long random value.");
 
 /* ---------- storage: one JSON file, written atomically ---------- */
 fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -30,7 +33,7 @@ function save() {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
     const tmp = DB_FILE + ".tmp";
-    fs.writeFile(tmp, JSON.stringify(db), err => {
+    fs.writeFile(tmp, JSON.stringify(db), { mode: 0o600 }, err => {
       if (err) return console.error("[db] write failed:", err.message);
       fs.rename(tmp, DB_FILE, e => e && console.error("[db] rename failed:", e.message));
     });
@@ -49,12 +52,31 @@ function newCode() {
   return c;
 }
 const str = (v, max = 2000) => String(v == null ? "" : v).slice(0, max);
-const token = () => crypto.createHmac("sha256", SECRET).update("facilitator:" + PIN).digest("hex");
+// Facilitator session token: "<expiry ms>.<hmac(secret, expiry|pin)>". Expires after SESSION_HOURS.
+const sign = exp => crypto.createHmac("sha256", SECRET).update("facilitator:" + exp + ":" + PIN).digest("hex");
+const token = () => { const exp = Date.now() + SESSION_HOURS * 3600e3; return exp + "." + sign(exp); };
 function validToken(t) {
-  if (!PIN || typeof t !== "string") return false;
-  const a = Buffer.from(t), b = Buffer.from(token());
+  if (!PIN || typeof t !== "string" || t.length > 200) return false;
+  const [exp, sig] = t.split(".");
+  if (!/^\d{10,16}$/.test(exp || "") || Number(exp) < Date.now() || typeof sig !== "string") return false;
+  const a = Buffer.from(sig), b = Buffer.from(sign(exp));
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
+
+/* ---------- abuse limits (in memory, per client IP) ---------- */
+const buckets = new Map(); // `${kind}:${ip}` -> {n, until, reset}
+function blocked(kind, ip) { const b = buckets.get(kind + ":" + ip); return !!b && b.until > Date.now(); }
+function strike(kind, ip, max, windowMs, lockMs) {
+  const k = kind + ":" + ip, now = Date.now(); let b = buckets.get(k);
+  if (!b || b.reset < now) b = { n: 0, until: 0, reset: now + windowMs };
+  b.n++; if (b.n >= max) b.until = now + lockMs;
+  buckets.set(k, b);
+}
+function clearStrikes(kind, ip) { buckets.delete(kind + ":" + ip); }
+setInterval(() => { const now = Date.now(); for (const [k, b] of buckets) if (b.reset < now && b.until < now) buckets.delete(k); }, 60e3).unref();
+// Behind Railway's proxy the client address is the last entry Railway appended to X-Forwarded-For.
+const clientIp = req => String((req.headers && req.headers["x-forwarded-for"] || "").split(",").pop() || (req.socket && req.socket.remoteAddress) || "?").trim();
+const TOO_MANY = "Too many attempts. Wait a few minutes and try again.";
 const TEAM_COLORS = ["#2B55C9", "#C98A00", "#1F8A62", "#6B4FB8", "#E0412F", "#0E8A9A", "#B5487C", "#5B6B2F"];
 
 function cleanBlock(x) {
@@ -86,15 +108,20 @@ function newSprint(title, template) {
 
 function publicSprint(s, viewer) {
   // viewer: {role:'facilitator'} | {role:'team', teamId} | {role:'screen'}
+  // Data minimisation: the projector gets no brief and no participant names; a team sees member names only for itself.
   const msgs = s.messages.filter(m =>
     viewer.role === "facilitator" ||
     (viewer.role === "screen" && m.to === "all" && m.from === "facilitator") ||
     (viewer.role === "team" && (m.to === "all" || m.to === viewer.teamId || m.teamId === viewer.teamId))
   ).slice(-150);
+  const screen = viewer.role === "screen";
+  const brief = screen ? { problem: "", context: "", kpi: "", goal: "", questions: [], resources: "", rules: "" } : s.brief;
+  const agenda = screen ? s.agenda.map(b => ({ ...b, tools: [] })) : s.agenda;
+  const seeMembers = t => viewer.role === "facilitator" || (viewer.role === "team" && viewer.teamId === t.id);
   return {
-    code: s.code, title: s.title, status: s.status, brief: s.brief, agenda: s.agenda, startTime: s.startTime,
+    code: s.code, title: s.title, status: s.status, brief, agenda, startTime: s.startTime,
     state: s.state, messages: msgs, createdAt: s.createdAt,
-    teams: s.teams.map(t => ({ id: t.id, name: t.name, color: t.color, members: t.members, done: t.done, help: t.help, online: online(s.code, t.id) })),
+    teams: s.teams.map(t => ({ id: t.id, name: t.name, color: t.color, members: seeMembers(t) ? t.members : [], done: t.done, help: t.help, online: online(s.code, t.id) })),
     serverNow: Date.now()
   };
 }
@@ -105,13 +132,27 @@ function online(code, teamId) { const p = presence.get(code + ":" + teamId); ret
 
 /* ---------- http ---------- */
 const app = express();
-app.use(express.json({ limit: "200kb" }));
-app.get("/health", (_req, res) => res.json({ ok: true, sprints: Object.keys(db.sprints).length }));
+app.disable("x-powered-by");
+app.use((req, res, next) => {
+  res.set({
+    "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' ws: wss:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+    "X-Content-Type-Options": "nosniff", "X-Frame-Options": "DENY", "Referrer-Policy": "no-referrer",
+    "X-Robots-Tag": "noindex, nofollow", "Permissions-Policy": "camera=(), microphone=(), geolocation=()"
+  });
+  if (req.path.startsWith("/api/")) res.set("Cache-Control", "no-store");
+  next();
+});
+app.get("/robots.txt", (_req, res) => res.type("text/plain").send("User-agent: *\nDisallow: /\n"));
+app.use(express.json({ limit: "20kb" }));
+app.get("/health", (_req, res) => res.json({ ok: true }));
 app.post("/api/login", (req, res) => {
+  const ip = clientIp(req);
+  if (blocked("pin", ip)) return res.status(429).json({ error: TOO_MANY });
   const pin = str(req.body && req.body.pin, 200);
   if (!PIN) return res.status(503).json({ error: "FACILITATOR_PIN is not set on the server." });
   const a = Buffer.from(pin), b = Buffer.from(PIN);
-  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return res.status(401).json({ error: "Wrong PIN." });
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) { strike("pin", ip, 5, 15 * 60e3, 15 * 60e3); return res.status(401).json({ error: "Wrong PIN." }); }
+  clearStrikes("pin", ip);
   res.json({ token: token() });
 });
 app.get("/api/templates", (_req, res) => res.json(Object.fromEntries(Object.entries(TEMPLATES).map(([k, v]) => [k, v.name]))));
@@ -124,10 +165,19 @@ app.use(express.static(path.join(__dirname, "public"), { extensions: ["html"] })
 app.get(["/run", "/prompts", "/f", "/f/*", "/s/*", "/screen/*", "/join/*"], (_req, res) => res.sendFile(path.join(__dirname, "public", "index.html")));
 
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: false } });
+const io = new Server(server, {
+  cors: { origin: false },
+  maxHttpBufferSize: 100e3,
+  // Reject cross-site WebSocket/polling handshakes: the page and the socket must share a host.
+  allowRequest: (req, cb) => {
+    const o = req.headers.origin; if (!o) return cb(null, true);
+    try { cb(null, new URL(o).host === req.headers.host); } catch (e) { cb(null, false); }
+  }
+});
 
 async function broadcast(code) {
   const s = db.sprints[code]; if (!s) return;
+  s.updatedAt = Date.now();
   const sockets = await io.in("s:" + code).fetchSockets();
   for (const so of sockets) so.emit("sprint", publicSprint(s, so.data.viewer || { role: "screen" }));
 }
@@ -183,9 +233,21 @@ function pushMessage(s, m) {
 io.on("connection", socket => {
   const isF = () => socket.data.viewer && socket.data.viewer.role === "facilitator";
   const ack = (cb, v) => typeof cb === "function" && cb(v);
+  const ip = clientIp(socket.request);
+  // Wrong code guesses: after 15 misses in 10 minutes this IP is locked out for 15 minutes.
+  const findSprint = (code, cb) => {
+    if (blocked("code", ip)) { ack(cb, { error: TOO_MANY }); return null; }
+    const s = db.sprints[String(code || "").toUpperCase().slice(0, 12)];
+    if (!s) { strike("code", ip, 15, 10 * 60e3, 15 * 60e3); ack(cb, { error: "No sprint with that code." }); return null; }
+    return s;
+  };
+  // Flood guard: more than 60 events in 10 s drops the connection.
+  let evN = 0, evT = Date.now();
+  socket.use((_pkt, next) => { const n = Date.now(); if (n - evT > 10e3) { evN = 0; evT = n; } if (++evN > 60) { socket.disconnect(true); return; } next(); });
 
   socket.on("f:hello", ({ token: t } = {}, cb) => {
-    if (!validToken(t)) return ack(cb, { error: "Session expired. Log in again." });
+    if (blocked("pin", ip)) return ack(cb, { error: TOO_MANY });
+    if (!validToken(t)) { strike("pin", ip, 10, 15 * 60e3, 15 * 60e3); return ack(cb, { error: "Session expired. Log in again." }); }
     socket.data.viewer = { role: "facilitator" };
     socket.join("facilitators");
     ack(cb, { ok: true, list: sprintList(), templates: Object.fromEntries(Object.entries(TEMPLATES).map(([k, v]) => [k, v.name])) });
@@ -262,15 +324,14 @@ io.on("connection", socket => {
 
   /* screen (projector) — read-only, public broadcasts only */
   socket.on("screen:watch", ({ code } = {}, cb) => {
-    const s = db.sprints[String(code || "").toUpperCase()]; if (!s) return ack(cb, { error: "No sprint with that code." });
+    const s = findSprint(code, cb); if (!s) return;
     socket.data.viewer = { role: "screen" }; socket.join("s:" + s.code);
     ack(cb, { sprint: publicSprint(s, socket.data.viewer) });
   });
 
   /* teams */
   socket.on("t:join", ({ code, teamId, teamName, member } = {}, cb) => {
-    const s = db.sprints[String(code || "").toUpperCase()];
-    if (!s) return ack(cb, { error: "No sprint with that code." });
+    const s = findSprint(code, cb); if (!s) return;
     if (s.status === "closed") return ack(cb, { error: "This sprint is closed." });
     let t = teamId && s.teams.find(x => x.id === teamId);
     if (!t) {
@@ -295,8 +356,7 @@ io.on("connection", socket => {
   });
 
   socket.on("t:teams", ({ code } = {}, cb) => {
-    const s = db.sprints[String(code || "").toUpperCase()];
-    if (!s) return ack(cb, { error: "No sprint with that code." });
+    const s = findSprint(code, cb); if (!s) return;
     ack(cb, { title: s.title, status: s.status, teams: s.teams.map(t => ({ id: t.id, name: t.name, color: t.color, members: t.members.length })) });
   });
 
@@ -339,5 +399,17 @@ setInterval(() => {
     }
   }
 }, 1000);
+
+// Retention: sprints idle for RETENTION_DAYS are deleted, so briefs and participant names do not linger.
+function purgeOld() {
+  if (!RETENTION_DAYS) return;
+  const cutoff = Date.now() - RETENTION_DAYS * 864e5; let n = 0;
+  for (const [code, s] of Object.entries(db.sprints)) {
+    if ((s.updatedAt || s.createdAt || 0) < cutoff) { io.to("s:" + code).emit("gone"); delete db.sprints[code]; n++; }
+  }
+  if (n) { console.log(`[retention] deleted ${n} sprint(s) idle for ${RETENTION_DAYS}+ days`); save(); broadcastList(); }
+}
+setTimeout(purgeOld, 5000).unref();
+setInterval(purgeOld, 6 * 3600e3).unref();
 
 server.listen(PORT, () => console.log(`AI Sprint Room listening on :${PORT} (data: ${DATA_DIR})`));

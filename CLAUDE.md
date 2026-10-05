@@ -20,6 +20,8 @@ A live control room for an **AI-accelerated Design Sprint** (Jake Knapp's 5-day 
 - Storage: **one JSON file on a Railway Volume** (`DATA_DIR=/data`), not Postgres.
 - One Railway replica only (state and timer are in-process).
 - UI language: English. Visual language: whiteboard, sticky-note yellow, red vote dots, Time Timer red disc (Sprint book vocabulary).
+- Privacy: the projector view gets no brief, no tool prompts and no member names; teams see member names of their own team only (filtered in `publicSprint`). Keep it that way when adding fields.
+- Abuse limits (code guessing, PIN, flood), 12 h facilitator tokens, origin check and CSP live in `server.js`; `RETENTION_DAYS` (default 30) purges idle sprints. User-facing summary in `docs/data-and-reliability.md`: keep it in sync.
 - Deliverables must be audited before handing over (filenames, language, format, content match what was discussed).
 
 ## Architecture
