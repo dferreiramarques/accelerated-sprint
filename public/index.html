@@ -12,13 +12,19 @@
 </head>
 <body>
 <header class="top"><div class="top-in">
-  <a class="brand" href="/"><i aria-hidden="true"></i>AI Sprint Room</a>
+  <a class="brand" href="/" data-nav><i aria-hidden="true"></i>AI Sprint Room</a>
+  <nav class="nav" id="mainNav" aria-label="Pages">
+    <a href="/" data-nav data-key="how">How it works</a>
+    <a href="/prompts" data-nav data-key="prompts">AI prompts</a>
+    <a href="/run" data-nav data-key="run" class="runlink">Run my Sprint!</a>
+  </nav>
   <span id="topRight" class="row"></span>
   <span class="conn" id="conn"><i></i><span>Connecting…</span></span>
 </div></header>
 <main id="view"></main>
 <div id="toast" class="toast" hidden></div>
 <script src="/socket.io/socket.io.js"></script>
+<script src="/content.js"></script>
 <script src="/app.js"></script>
 </body>
 </html>

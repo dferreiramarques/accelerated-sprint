@@ -133,26 +133,31 @@ function feedHtml(sp, role) {
 function boot() {
   clearListeners(); S.sprint = null; document.querySelector(".top").hidden = false; $("#topRight").innerHTML = ""; document.title = "AI Sprint Room";
   const p = location.pathname.split("/").filter(Boolean);
-  if (!p.length) return landing();
+  setNav(p[0] === "prompts" ? "prompts" : !p.length ? "how" : "run");
+  if (!p.length) return howItWorks();
+  if (p[0] === "prompts") return promptsPage();
+  if (p[0] === "run") return landing();
   if (p[0] === "join") return joinView((p[1] || "").toUpperCase());
   if (p[0] === "s") return teamView((p[1] || "").toUpperCase());
   if (p[0] === "screen") return screenView((p[1] || "").toUpperCase());
   if (p[0] === "f" && !p[1]) return facDash();
   if (p[0] === "f") return facConsole(p[1].toUpperCase());
-  landing();
+  howItWorks();
 }
+function setNav(key) { document.querySelectorAll("#mainNav a").forEach(a => a.setAttribute("aria-current", a.dataset.key === key ? "page" : "false")); }
 
 /* ---------- landing ---------- */
 function landing() {
   view.innerHTML = `<section class="hero">
     <div class="stack">
       <span class="scribble">one problem · one day · many teams</span>
-      <h1>The control room for your AI Sprint.</h1>
+      <h1>Run my Sprint!</h1>
       <p class="muted" style="font-size:1.08rem;max-width:56ch">Teams join with a code and see the brief, the agenda, the active block, its AI tools and a shared timer. The facilitator moves the sprint forward and pushes messages to everyone or to one team.</p>
     </div>
     <div class="stack">
       <form class="card stack" id="joinForm"><h2>Join a sprint</h2><label class="f">Sprint code<input id="code" class="bigcode" maxlength="6" autocomplete="off" placeholder="ABC123" required></label><button class="btn primary" type="submit">Continue</button></form>
       <div class="card row between"><div><h3>Facilitator</h3><p class="muted" style="font-size:.88rem">Create sprints, run the timer, push messages.</p></div><a class="btn" href="/f" data-nav>Open console</a></div>
+      <p class="muted" style="font-size:.88rem">New to the format? <a href="/" data-nav>See how the sprint works</a>.</p>
     </div></section>`;
   $("#joinForm").onsubmit = e => { e.preventDefault(); const c = $("#code").value.trim().toUpperCase(); if (c) nav("/join/" + c); };
 }

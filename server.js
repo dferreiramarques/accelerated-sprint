@@ -115,8 +115,13 @@ app.post("/api/login", (req, res) => {
   res.json({ token: token() });
 });
 app.get("/api/templates", (_req, res) => res.json(Object.fromEntries(Object.entries(TEMPLATES).map(([k, v]) => [k, v.name]))));
+// Full agenda of a template: used by the "How it works" and "AI prompts" pages.
+app.get("/api/templates/:key", (req, res) => {
+  const t = TEMPLATES[req.params.key]; if (!t) return res.status(404).json({ error: "Unknown template." });
+  res.json({ key: req.params.key, name: t.name, blocks: t.blocks });
+});
 app.use(express.static(path.join(__dirname, "public"), { extensions: ["html"] }));
-app.get(["/f", "/f/*", "/s/*", "/screen/*", "/join/*"], (_req, res) => res.sendFile(path.join(__dirname, "public", "index.html")));
+app.get(["/run", "/prompts", "/f", "/f/*", "/s/*", "/screen/*", "/join/*"], (_req, res) => res.sendFile(path.join(__dirname, "public", "index.html")));
 
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: false } });

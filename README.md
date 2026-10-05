@@ -9,6 +9,8 @@ Live control room for an AI-accelerated Design Sprint (Jake Knapp's Sprint, comp
 - **Room screen** (`/screen/CODE`) shows the join code in the lobby, then the active block and a big Time Timer for the projector.
 - Each team presents its results on the call; this app does not collect deliverables.
 
+Developer notes for continuing the project are in `CLAUDE.md`.
+
 Agenda templates: *Day 1 · 8h sprint*, *Extension · +8h*, *Blank*. Edit them in `templates.js`.
 
 ## Run locally
@@ -40,7 +42,9 @@ Everything is stored in one JSON file (`$DATA_DIR/sprints.json`), written atomic
 
 | Path | Who |
 |---|---|
-| `/` | Landing: enter a sprint code |
+| `/` | How it works: method, timeline, roles, run-sheet |
+| `/prompts` | AI prompt library |
+| `/run` | Run my Sprint!: enter a sprint code or open the console |
 | `/join/CODE` | Pick or create a team |
 | `/s/CODE` | Team view |
 | `/f` | Facilitator dashboard (PIN) |
