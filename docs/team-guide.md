@@ -57,4 +57,4 @@ These come from the brief and are shown in the app:
 
 **Can I use it on my phone?** Yes, the layout is built to work on a phone as well as a laptop.
 
-**What happens to the data after the sprint?** The facilitator can delete it at any time, and it is deleted automatically after 30 idle days. Keep briefs free of personal or confidential data.
+**What happens to the data after the sprint?** The facilitator can delete it at any time, and after 90 idle days it is archived and its code stops working. Keep briefs free of personal or confidential data.

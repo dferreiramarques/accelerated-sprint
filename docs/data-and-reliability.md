@@ -42,13 +42,14 @@ The projector shows a room full of people whatever is on it, which is why it nev
 | Script injection | Content-Security-Policy allows scripts only from the app itself; all user text is escaped before display |
 | Embedding or indexing | The site cannot be framed, sets `noindex`, and serves `robots.txt` with `Disallow: /` |
 | Flooding | More than 60 messages in 10 seconds disconnects that client; request bodies are capped at 20 KB, socket messages at 100 KB; text fields are length-capped |
-| Data lingering after the sprint | Sprints idle for `RETENTION_DAYS` (default 30) are deleted automatically. The facilitator can delete a sprint at any time. Set `RETENTION_DAYS=0` to keep data forever |
+| Data lingering after the sprint | Sprints idle for `RETENTION_DAYS` (default 90) are archived automatically: the code stops working for teams and the projector, and the sprint is listed only in the facilitator console, where it can be restored or deleted. The facilitator can also archive or delete any sprint at any time. Nothing is deleted automatically; set `RETENTION_DAYS=0` to turn archiving off |
 | Leaking through the health check | `/health` returns only `{"ok":true}` |
 
 ## Honest limits
 
 - **The sprint code is still the only credential for teams.** Share it only with participants, like a meeting link. Anyone who has it can read the brief and the agenda and can join as a team.
 - **Rate limits are per client address and kept in memory.** They reset when the server restarts, and people behind one office network share a budget (15 wrong codes is plenty for honest typos).
+- **Archived data is still stored.** Archiving hides a sprint; only **Delete** removes it from the server.
 - **No audit log** of who did what, and **no backups**: the data is one file on a Railway Volume. Copy the brief elsewhere if it matters.
 - **The file is not encrypted by the app.** Anyone with access to the Railway project can read it.
 - **One PIN** for all facilitators; no per-person accounts.

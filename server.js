@@ -15,7 +15,7 @@ const PIN = process.env.FACILITATOR_PIN || "";
 const SECRET = process.env.SESSION_SECRET || PIN || "dev";
 const DATA_DIR = process.env.DATA_DIR || process.env.RAILWAY_VOLUME_MOUNT_PATH || path.join(__dirname, "data");
 const DB_FILE = path.join(DATA_DIR, "sprints.json");
-const RETENTION_DAYS = Math.max(0, Number(process.env.RETENTION_DAYS == null ? 30 : process.env.RETENTION_DAYS) || 0); // 0 = keep forever
+const RETENTION_DAYS = Math.max(0, Number(process.env.RETENTION_DAYS == null ? 90 : process.env.RETENTION_DAYS) || 0); // 0 = keep forever
 const SESSION_HOURS = 12;
 
 if (!PIN) console.warn("[warn] FACILITATOR_PIN is not set: facilitator login is disabled until you set it.");
@@ -181,10 +181,19 @@ async function broadcast(code) {
   const sockets = await io.in("s:" + code).fetchSockets();
   for (const so of sockets) so.emit("sprint", publicSprint(s, so.data.viewer || { role: "screen" }));
 }
+// Archived sprints are hidden from teams and the projector (the code stops working) but stay in the facilitator console.
+async function setArchived(s, on) {
+  s.archived = on; s.updatedAt = Date.now();
+  if (on) {
+    s.archivedAt = s.updatedAt;
+    for (const so of await io.in("s:" + s.code).fetchSockets()) if (!so.data.viewer || so.data.viewer.role !== "facilitator") { so.emit("gone"); so.disconnect(true); }
+  } else delete s.archivedAt;
+  save(); broadcastList();
+}
 function broadcastList() { io.to("facilitators").emit("list", sprintList()); }
 function sprintList() {
   return Object.values(db.sprints).sort((a, b) => b.createdAt - a.createdAt).map(s => ({
-    code: s.code, title: s.title, status: s.status, createdAt: s.createdAt, teams: s.teams.length,
+    code: s.code, title: s.title, status: s.status, createdAt: s.createdAt, teams: s.teams.length, archived: !!s.archived,
     problem: s.brief.problem, blocks: s.agenda.length, idx: s.state.idx
   }));
 }
@@ -237,7 +246,8 @@ io.on("connection", socket => {
   // Wrong code guesses: after 15 misses in 10 minutes this IP is locked out for 15 minutes.
   const findSprint = (code, cb) => {
     if (blocked("code", ip)) { ack(cb, { error: TOO_MANY }); return null; }
-    const s = db.sprints[String(code || "").toUpperCase().slice(0, 12)];
+    let s = db.sprints[String(code || "").toUpperCase().slice(0, 12)];
+    if (s && s.archived) s = null; // archived sprints exist only inside the facilitator console
     if (!s) { strike("code", ip, 15, 10 * 60e3, 15 * 60e3); ack(cb, { error: "No sprint with that code." }); return null; }
     return s;
   };
@@ -271,6 +281,13 @@ io.on("connection", socket => {
     if (!db.sprints[code]) return ack(cb, { error: "Sprint not found." });
     io.to("s:" + code).emit("gone");
     delete db.sprints[code]; save(); broadcastList(); ack(cb, { ok: true });
+  });
+
+  socket.on("f:archive", async ({ code, archived } = {}, cb) => {
+    if (!isF()) return ack(cb, { error: "Not allowed." });
+    const s = db.sprints[code]; if (!s) return ack(cb, { error: "Sprint not found." });
+    await setArchived(s, !!archived);
+    ack(cb, { ok: true });
   });
 
   socket.on("f:watch", ({ code } = {}, cb) => {
@@ -400,14 +417,14 @@ setInterval(() => {
   }
 }, 1000);
 
-// Retention: sprints idle for RETENTION_DAYS are deleted, so briefs and participant names do not linger.
-function purgeOld() {
+// Retention: sprints idle for RETENTION_DAYS are archived (nothing is deleted): teams and the projector can no longer reach them.
+async function purgeOld() {
   if (!RETENTION_DAYS) return;
   const cutoff = Date.now() - RETENTION_DAYS * 864e5; let n = 0;
-  for (const [code, s] of Object.entries(db.sprints)) {
-    if ((s.updatedAt || s.createdAt || 0) < cutoff) { io.to("s:" + code).emit("gone"); delete db.sprints[code]; n++; }
+  for (const s of Object.values(db.sprints)) {
+    if (!s.archived && (s.updatedAt || s.createdAt || 0) < cutoff) { await setArchived(s, true); n++; }
   }
-  if (n) { console.log(`[retention] deleted ${n} sprint(s) idle for ${RETENTION_DAYS}+ days`); save(); broadcastList(); }
+  if (n) console.log(`[retention] archived ${n} sprint(s) idle for ${RETENTION_DAYS}+ days`);
 }
 setTimeout(purgeOld, 5000).unref();
 setInterval(purgeOld, 6 * 3600e3).unref();

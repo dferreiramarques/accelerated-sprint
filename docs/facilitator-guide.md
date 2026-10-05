@@ -47,7 +47,7 @@ When the timer reaches zero, everyone gets a banner and a beep. **Nothing advanc
 1. Run the last block (*Team presentations and decision*): teams present on the Teams call, the decider decides.
 2. **Close sprint**.
 3. Capture what you need elsewhere: the app does not export a report yet (it is on the backlog).
-4. **Delete** the sprint when you no longer need it, which removes its data from the server. Otherwise it is deleted automatically after 30 idle days.
+4. **Delete** the sprint when you no longer need it, which removes its data from the server. **Archive** hides it instead: its code stops working for teams and the projector, and it moves to the *Archived* list in your console, where you can **Restore** it. Sprints idle for 90 days are archived automatically; nothing is deleted automatically.
 
 ## If something goes wrong
 

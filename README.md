@@ -44,7 +44,7 @@ Facilitator console: http://localhost:3000/f (PIN `1234`). Teams: http://localho
 | `FACILITATOR_PIN` | yes | PIN for the facilitator console. Without it, facilitator login is disabled. |
 | `SESSION_SECRET` | strongly recommended | Long random string used to sign facilitator sessions (they expire after 12 h). Changing it logs facilitators out. |
 | `DATA_DIR` | on Railway: `/data` | Folder for `sprints.json`. Falls back to `RAILWAY_VOLUME_MOUNT_PATH`, then `./data`. |
-| `RETENTION_DAYS` | no | Sprints idle this many days are deleted automatically. Default 30; `0` keeps them forever. |
+| `RETENTION_DAYS` | no | Sprints idle this many days are archived automatically (hidden from teams, still in the console). Default 90; `0` turns it off. |
 | `PORT` | no | Defaults to 3000 (Railway sets it). |
 
 ## Deploy on Railway
@@ -61,7 +61,7 @@ Keep **one replica**. State and the timer live in one process (`railway.json` al
 
 - The projector screen gets **no brief and no participant names**. A team sees member names of its own team only.
 - Wrong sprint codes and wrong PINs are rate limited; facilitator sessions expire after 12 hours; cross-site connections are refused; a strict Content-Security-Policy is set.
-- Idle sprints are deleted after `RETENTION_DAYS` (default 30).
+- Sprints idle for `RETENTION_DAYS` (default 90) are archived: their code stops working and they are listed only in the facilitator console, where they can be restored. Nothing is deleted automatically.
 - The sprint code is still the only credential for teams: share it only with participants and keep briefs anonymised. Details and limits: [Data, security and reliability](docs/data-and-reliability.md).
 
 ## Routes

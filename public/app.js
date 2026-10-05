@@ -243,7 +243,7 @@ function teamView(code) {
   on("sprint", sp => { setSprint(sp); if (lastIdx !== null && sp.state.idx !== lastIdx && sp.state.idx >= 0) { beep(1); flashTitle("Next block"); } lastIdx = sp.state.idx; render(); });
   on("timeup", () => { showBanner("Time's up for this block.", "timeup"); beep(3); flashTitle("Time's up"); });
   on("kicked", () => { ls.del("asr:team:" + code); toast("The facilitator removed your team."); nav("/join/" + code); });
-  on("gone", () => { view.innerHTML = `<div class="empty"><h2>This sprint was deleted.</h2><a class="btn" href="/" data-nav>Home</a></div>`; });
+  on("gone", () => { view.innerHTML = `<div class="empty"><h2>This sprint is no longer available.</h2><a class="btn" href="/" data-nav>Home</a></div>`; });
   const join = async () => {
     const r = await emit("t:join", { code, teamId, member: ls.get("asr:member", "") });
     if (r.error) { if (/team/i.test(r.error)) { ls.del("asr:team:" + code); return nav("/join/" + code); } view.innerHTML = `<div class="empty"><h2>${esc(r.error)}</h2><a class="btn" href="/" data-nav>Home</a></div>`; return; }
@@ -276,25 +276,28 @@ async function facDash() {
   view.innerHTML = `<div class="empty"><p class="muted">Loading…</p></div>`;
   let confirmDel = null, list = [], templates = {};
   const render = () => {
+    const arch = list.filter(s => s.archived);
     view.innerHTML = `<div class="stack">
       <div class="row between"><div class="stack" style="gap:6px"><span class="eyebrow">Facilitator console</span><h1>Sprints</h1></div></div>
       <form class="card row" id="cf" style="align-items:flex-end">
         <label class="f" style="flex:2 1 260px">New sprint title<input id="ct" required maxlength="120" placeholder="e.g. Sprint 01 · First-attempt failures"></label>
         <label class="f" style="flex:1 1 180px">Agenda<select id="ctpl">${Object.entries(templates).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join("")}</select></label>
         <button class="btn primary">Create sprint</button></form>
-      ${list.length ? `<div class="grid g3">${list.map(s => `<article class="card stack" style="gap:8px">
-          <div class="row between"><span class="code">${s.code}</span><span class="pill" style="color:${s.status === "running" ? "var(--ok)" : s.status === "closed" ? "var(--ink-2)" : "var(--marker)"}">${s.status}</span></div>
-          <h3>${esc(s.title)}</h3><p class="muted" style="font-size:.88rem">${s.problem ? esc(s.problem) : "No problem written yet."}</p>
-          <p class="muted mono" style="font-size:.78rem">${s.teams} team(s) · ${s.idx >= 0 ? `block ${s.idx + 1}/${s.blocks}` : `${s.blocks} blocks`} · ${new Date(s.createdAt).toLocaleDateString()}</p>
-          <div class="row" style="gap:4px"><a class="btn small primary" href="/f/${s.code}" data-nav>Open</a><button class="btn small" data-dup="${s.code}">Duplicate</button>
-          ${confirmDel === s.code ? `<button class="btn small red" data-delyes="${s.code}">Delete for good</button><button class="btn small ghost" data-delno>Keep</button>` : `<button class="btn small ghost" data-del="${s.code}">Delete</button>`}</div></article>`).join("")}</div>`
-        : `<div class="empty"><span class="hand" style="font-size:1.8rem;color:var(--marker)">No sprints yet</span><p class="muted">Create one above. Each sprint gets its own code for teams to join.</p></div>`}</div>`;
+      ${card(list.filter(s => !s.archived))}${arch.length ? `<details class="stack" ${arch.some(s => s.code === confirmDel) ? "open" : ""}><summary class="eyebrow" style="cursor:pointer">Archived (${arch.length})</summary><p class="muted" style="font-size:.88rem">Hidden from teams and the room screen: their codes no longer work. Restore one to use it again.</p>${card(arch)}</details>` : ""}</div>`;
     $("#cf").onsubmit = async e => { e.preventDefault(); const r = await emit("f:create", { title: $("#ct").value, template: $("#ctpl").value }); if (r.error) return toast(r.error); nav("/f/" + r.code); };
+    view.querySelectorAll("[data-arch]").forEach(b => b.onclick = async () => { const r = await emit("f:archive", { code: b.dataset.arch, archived: b.dataset.to === "1" }); r.error ? toast(r.error) : toast(b.dataset.to === "1" ? "Archived. Its code no longer works." : "Restored."); });
     view.querySelectorAll("[data-dup]").forEach(b => b.onclick = async () => { const r = await emit("f:duplicate", { code: b.dataset.dup }); r.error ? toast(r.error) : toast("Duplicated as " + r.code); });
     view.querySelectorAll("[data-del]").forEach(b => b.onclick = () => { confirmDel = b.dataset.del; render(); });
     view.querySelectorAll("[data-delno]").forEach(b => b.onclick = () => { confirmDel = null; render(); });
     view.querySelectorAll("[data-delyes]").forEach(b => b.onclick = async () => { confirmDel = null; const r = await emit("f:delete", { code: b.dataset.delyes }); if (r.error) toast(r.error); });
   };
+  const card = items => items.length ? `<div class="grid g3">${items.map(s => `<article class="card stack" style="gap:8px">
+          <div class="row between"><span class="code">${s.code}</span><span class="pill" style="color:${s.status === "running" ? "var(--ok)" : s.status === "closed" ? "var(--ink-2)" : "var(--marker)"}">${s.status}</span></div>
+          <h3>${esc(s.title)}</h3><p class="muted" style="font-size:.88rem">${s.problem ? esc(s.problem) : "No problem written yet."}</p>
+          <p class="muted mono" style="font-size:.78rem">${s.teams} team(s) · ${s.idx >= 0 ? `block ${s.idx + 1}/${s.blocks}` : `${s.blocks} blocks`} · ${new Date(s.createdAt).toLocaleDateString()}</p>
+          <div class="row" style="gap:4px"><a class="btn small primary" href="/f/${s.code}" data-nav>Open</a><button class="btn small" data-dup="${s.code}">Duplicate</button><button class="btn small ghost" data-arch="${s.code}" data-to="${s.archived ? 0 : 1}">${s.archived ? "Restore" : "Archive"}</button>
+          ${confirmDel === s.code ? `<button class="btn small red" data-delyes="${s.code}">Delete for good</button><button class="btn small ghost" data-delno>Keep</button>` : `<button class="btn small ghost" data-del="${s.code}">Delete</button>`}</div></article>`).join("")}</div>`
+        : `<div class="empty"><span class="hand" style="font-size:1.8rem;color:var(--marker)">No sprints yet</span><p class="muted">Create one above. Each sprint gets its own code for teams to join.</p></div>`;
   on("list", l => { list = l; if (!document.activeElement || !view.contains(document.activeElement) || document.activeElement.tagName === "BUTTON") render(); });
   const start = async () => { const h = await fHello(); if (!h) return loginView(facDash); facTop(); list = h.list; templates = h.templates; render(); };
   on("connect", start); if (socket.connected) start();
